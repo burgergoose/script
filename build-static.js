@@ -147,18 +147,22 @@ async function main() {
   // sw.js and uv.config.js live under shared/a/ - and since a Service Worker's scope ceiling
   // is set by the directory of the registering SCRIPT, not the calling page, every mirror can
   // register this one shared worker with this one shared scope.
-  const uvConfigSrc = `/*global Ultraviolet*/
-self.__uv$config = {
-  prefix: '${sharedBase}a/service/',
-  encodeUrl: Ultraviolet.codec.xor.encode,
-  decodeUrl: Ultraviolet.codec.xor.decode,
-  handler: '${engineBase}controller/uv.handler.js',
-  client: '${engineBase}controller/uv.client.js',
-  bundle: '${engineBase}core/uv.bundle.js',
-  config: '${sharedBase}a/uv.config.js',
-  sw: '${engineBase}core/uv.sw.js',
-};
-`;
+  // uv.config.js carries the address cipher, so it's the real file with only its paths swapped.
+  let uvConfigSrc = fs.readFileSync(path.join(root, 'public', 'a', 'uv.config.js'), 'utf8');
+  for (const [from, to] of [
+    ["prefix: '/a/service/'", `prefix: '${sharedBase}a/service/'`],
+    ["config: '/a/uv.config.js'", `config: '${sharedBase}a/uv.config.js'`],
+    ["handler: '/engine/", `handler: '${engineBase}`],
+    ["client: '/engine/", `client: '${engineBase}`],
+    ["bundle: '/engine/", `bundle: '${engineBase}`],
+    ["sw: '/engine/", `sw: '${engineBase}`],
+  ]) {
+    if (!uvConfigSrc.includes(from)) {
+      console.error(`uv.config.js no longer contains ${JSON.stringify(from)} - fix this script's replace target.`);
+      process.exit(1);
+    }
+    uvConfigSrc = uvConfigSrc.replace(from, to);
+  }
   fs.writeFileSync(path.join(shared, 'a', 'uv.config.js'), await obf(uvConfigSrc));
 
   // sw.js loads uv.bundle.js itself; point that one import at the engine.
