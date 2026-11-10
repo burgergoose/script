@@ -5,13 +5,24 @@
 //
 //   node build-static.js --base /USER/REPO/main/ --backend wss://your-address.example
 //
-// --base     the folder the page lives in on the host. On raw.githack.com that is /USER/REPO/BRANCH/
+// --base     the repo's folder on the host. On raw.githack.com that is /USER/REPO/BRANCH/
 // --backend  the public address of the laptop's server (wss://...)
-// --out      output folder (default: site)
-// --engine   (optional) a GitHub-hosted base URL (e.g. a raw.githack.com link to another repo)
-//            that already holds the engine files. When set, this build does NOT copy the engine
-//            into --out - the page fetches it from --engine at runtime instead. Omit it to build
-//            a single self-contained site, same as before.
+// --out      output folder (default: site) - a plain folder, not expected to be a git
+//            working tree; copy its contents into one yourself afterward.
+// --mirrors  comma-separated list of entry-point folder names (default: v0001). Each one
+//            becomes a tiny index.svg; everything else lives once under shared/ and every
+//            mirror points at it. A Service Worker's scope ceiling is set by the directory
+//            of the SCRIPT that registers it, not the page that calls .register() - so many
+//            different mirror pages can all register the one shared/a/sw.js with the one
+//            shared scope, regardless of which mirror the visitor actually opened.
+// --engine   (optional) a GitHub-hosted base URL (e.g. a raw.githack.com or jsDelivr link
+//            to another repo) that already holds the engine files
+//            (controller/core/networking/transport). When set, this build does NOT copy
+//            the engine into --out - the page fetches it from --engine at runtime instead.
+//            Omit it to build a single self-contained site, same as before.
+// --scripts  (optional) a GitHub-hosted base URL for the supporting-library repo (lib.js).
+//            When set, lib.js is NOT copied into --out - m.json points at --scripts instead.
+//            Omit it to copy lib.js into --out and reference it locally.
 //
 // Each build gets a new submission_id (a 10-digit number), written to UPDATE_ID in --out
 // and printed below. Add it to the link you share as ?submission_id=<id> so you can tell
@@ -33,69 +44,141 @@ if (!/^wss?:\/\/[^/]+$/.test(backend)) {
   console.error('Missing or invalid --backend (expected something like wss://your-address.example)');
   process.exit(1);
 }
+const mirrors = (args.mirrors || 'v0001').split(',').map((s) => s.trim()).filter(Boolean);
 
 const root = __dirname;
 const out = path.resolve(root, args.out || 'site');
 const epoxyPath = path.join(root, 'node_modules', '@mercuryworkshop', 'epoxy-transport', 'dist');
-const skipMaps = (src) => !src.endsWith('.map') && !src.endsWith('.d.ts');
 
 let engine = args.engine || '';
 if (engine && !engine.endsWith('/')) engine += '/';
+let scripts = args.scripts || '';
+if (scripts && !scripts.endsWith('/')) scripts += '/';
 
 fs.rmSync(out, { recursive: true, force: true });
+const shared = path.join(out, 'shared');
+const sharedBase = `${base}shared/`;
+
+// The engine's four parts. Each vendor file goes under one category folder.
+// controller/core = the rewriting engine itself; networking/transport = the socket layer.
+const ENGINE_FILES = {
+  'controller/uv.handler.js': path.join(uvPath, 'uv.handler.js'),
+  'controller/uv.client.js': path.join(uvPath, 'uv.client.js'),
+  'core/uv.bundle.js': path.join(uvPath, 'uv.bundle.js'),
+  'core/uv.sw.js': path.join(uvPath, 'uv.sw.js'),
+  'networking/index.js': path.join(epoxyPath, 'index.js'),
+  'networking/index.mjs': path.join(epoxyPath, 'index.mjs'),
+  'transport/index.js': path.join(baremuxPath, 'index.js'),
+  'transport/index.mjs': path.join(baremuxPath, 'index.mjs'),
+  'transport/worker.js': path.join(baremuxPath, 'worker.js'),
+};
+
+const engineBase = engine || sharedBase + 'engine/';
 if (!engine) {
-  // Self-contained build: the engine files live in this same output.
-  fs.cpSync(uvPath, path.join(out, 'a'), { recursive: true, filter: skipMaps });
-  fs.cpSync(baremuxPath, path.join(out, 'c'), { recursive: true, filter: skipMaps });
-  fs.cpSync(epoxyPath, path.join(out, 'b'), { recursive: true, filter: skipMaps });
+  // Self-contained build: the engine files live in this same output, under shared/engine/.
+  for (const [rel, src] of Object.entries(ENGINE_FILES)) {
+    const dest = path.join(shared, 'engine', rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+  }
 }
-// Our own files last so they replace the stock sw.js.
-fs.cpSync(path.join(root, 'public'), out, {
+
+// Everything but the per-mirror index.svg lives once, under shared/.
+fs.cpSync(path.join(root, 'public'), shared, {
   recursive: true,
-  filter: (src) => !['locked.html', '404.html'].includes(path.basename(src)),
+  filter: (src) => !['locked.html', '404.html', 'index.svg'].includes(path.basename(src)),
 });
 
-// sw.js is always served from this repo's own a/ folder (a Service Worker's scope can never
-// reach outside the directory of the script that registered it), so prefix stays under base+'a/'
-// even when the engine's other files (uv.bundle.js etc.) are fetched from elsewhere.
-const a = engine ? engine + 'a/' : base + 'a/';
-fs.writeFileSync(path.join(out, 'a', 'uv.config.js'), `/*global Ultraviolet*/
+// achroma.js is the main script - core/api.js (networking) and core/inject.js (page
+// injection) stay separate files locally, for easier editing, and are joined here.
+fs.rmSync(path.join(shared, 'core'), { recursive: true, force: true });
+fs.writeFileSync(path.join(shared, 'achroma.js'),
+  fs.readFileSync(path.join(root, 'public', 'core', 'api.js'), 'utf8') + '\n' +
+  fs.readFileSync(path.join(root, 'public', 'core', 'inject.js'), 'utf8'));
+
+if (scripts) {
+  // lib.js is fetched from the scripts repo at runtime - don't ship our own copy.
+  fs.rmSync(path.join(shared, 'lib.js'), { force: true });
+}
+const libUrl = scripts ? scripts + 'lib.js' : 'lib.js';
+
+// sw.js and uv.config.js live under shared/a/ - and since a Service Worker's scope ceiling
+// is set by the directory of the registering SCRIPT, not the calling page, every mirror can
+// register this one shared worker with this one shared scope.
+fs.writeFileSync(path.join(shared, 'a', 'uv.config.js'), `/*global Ultraviolet*/
 self.__uv$config = {
-  prefix: '${base}a/service/',
+  prefix: '${sharedBase}a/service/',
   encodeUrl: Ultraviolet.codec.xor.encode,
   decodeUrl: Ultraviolet.codec.xor.decode,
-  handler: '${a}uv.handler.js',
-  client: '${a}uv.client.js',
-  bundle: '${a}uv.bundle.js',
-  config: '${base}a/uv.config.js',
-  sw: '${a}uv.sw.js',
+  handler: '${engineBase}controller/uv.handler.js',
+  client: '${engineBase}controller/uv.client.js',
+  bundle: '${engineBase}core/uv.bundle.js',
+  config: '${sharedBase}a/uv.config.js',
+  sw: '${engineBase}core/uv.sw.js',
 };
 `);
-if (engine) {
-  // sw.js loads uv.bundle.js itself; point that one import at the engine too.
-  const swPath = path.join(out, 'a', 'sw.js');
-  const sw = fs.readFileSync(swPath, 'utf8').replace("importScripts('uv.bundle.js');", `importScripts('${a}uv.bundle.js');`);
-  fs.writeFileSync(swPath, sw);
-  // index.html loads uv.bundle.js and the transport library's entry script directly too.
-  const htmlPath = path.join(out, 'index.html');
-  const html = fs.readFileSync(htmlPath, 'utf8')
-    .replace('src="a/uv.bundle.js"', `src="${a}uv.bundle.js"`)
-    .replace('src="c/index.js"', `src="${engine}c/index.js"`);
-  fs.writeFileSync(htmlPath, html);
+
+// sw.js loads uv.bundle.js itself; point that one import at the engine.
+const swPath = path.join(shared, 'a', 'sw.js');
+const swSrc = fs.readFileSync(swPath, 'utf8');
+const swMarker = "importScripts('/engine/core/uv.bundle.js');";
+if (!swSrc.includes(swMarker)) {
+  console.error(`sw.js no longer contains ${JSON.stringify(swMarker)} - fix this script's replace target.`);
+  process.exit(1);
 }
+fs.writeFileSync(swPath, swSrc.replace(swMarker, `importScripts('${engineBase}core/uv.bundle.js');`));
+
+// shared/index.html's bootstrap script reads this to know what to load, and in what order.
+// Paths here are relative to shared/ (where index.html lives), except the cross-repo ones.
+fs.writeFileSync(path.join(shared, 'm.json'), JSON.stringify({
+  load: [
+    `${engineBase}core/uv.bundle.js`,
+    'a/uv.config.js',
+    `${engineBase}transport/index.js`,
+    libUrl,
+    'config.js',
+    'achroma.js',
+  ],
+}, null, 2) + '\n');
 
 // A new id per build, so a shared link can say which update it points at.
 const submissionId = args['submission-id'] || (
   String(1 + Math.floor(Math.random() * 9)) + // first digit 1-9
   Array.from({ length: 9 }, () => Math.floor(Math.random() * 10)).join('')
 );
-fs.writeFileSync(path.join(out, 'config.js'),
-  `window.V1 = '${backend}';\nwindow.V2 = '${submissionId}';\nwindow.V3 = '${engine}';\n`);
+fs.writeFileSync(path.join(shared, 'config.js'),
+  `window.V2 = '${submissionId}';\nwindow.V3 = '${engineBase}';\n`);
 fs.writeFileSync(path.join(out, 'UPDATE_ID'), submissionId + '\n');
+
+// Backend selection lives here, not in config.js - dressed up as an ordinary page.
+const accountPath = path.join(shared, 'pages', 'account.html');
+const accountSrc = fs.readFileSync(accountPath, 'utf8');
+const cfgMarker = /<script id="cfg">[\s\S]*?<\/script>/;
+if (!cfgMarker.test(accountSrc)) {
+  console.error('pages/account.html has no <script id="cfg"> block - fix this script\'s replace target.');
+  process.exit(1);
+}
+fs.writeFileSync(accountPath, accountSrc.replace(cfgMarker,
+  `<script id="cfg">\n    window.V1 = '${backend}';\n  </script>`));
+
+// Each mirror is just a thin index.svg pointing at the one shared/index.html.
+const mirrorSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%"><foreignObject width="100%" height="100%"><html xmlns="http://www.w3.org/1999/xhtml"><head><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0d0f14}iframe{width:100%;height:100%;border:0;display:block}</style></head><body>
+<iframe id="f" title="Home" allowfullscreen="true"></iframe>
+<script><![CDATA[
+  document.getElementById('f').src = '../shared/index.html' + location.hash;
+]]></script>
+</body></html></foreignObject></svg>
+`;
+for (const mirror of mirrors) {
+  fs.mkdirSync(path.join(out, mirror), { recursive: true });
+  fs.writeFileSync(path.join(out, mirror, 'index.svg'), mirrorSvg);
+}
 
 console.log(`Built ${out}`);
 console.log(`  base:         ${base}`);
-console.log(`  engine:       ${engine || '(self-contained)'}`);
+console.log(`  mirrors:      ${mirrors.join(', ')}`);
+console.log(`  engine:       ${engine || '(self-contained, under shared/engine/)'}`);
+console.log(`  scripts:      ${scripts || '(self-contained, lib.js included)'}`);
 console.log(`  backend:      ${backend}`);
 console.log(`  submission id: ${submissionId}`);
 console.log(`  add to the shared link: ?submission_id=${submissionId}`);
