@@ -16,5 +16,8 @@
     "@mercuryworkshop/wisp-js": "^0.5.3",
     "@titaniumnetwork-dev/ultraviolet": "^3.2.10",
     "express": "^5.3.0"
+  },
+  "devDependencies": {
+    "terser": "^5.51.2"
   }
 }
