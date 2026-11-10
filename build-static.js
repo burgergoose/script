@@ -9,12 +9,13 @@
 // --backend  the public address of the laptop's server (wss://...)
 // --out      output folder (default: site) - a plain folder, not expected to be a git
 //            working tree; copy its contents into one yourself afterward.
-// --mirrors  comma-separated list of entry-point folder names (default: v0001). Each one
-//            becomes a tiny index.svg; everything else lives once under shared/ and every
-//            mirror points at it. A Service Worker's scope ceiling is set by the directory
-//            of the SCRIPT that registers it, not the page that calls .register() - so many
-//            different mirror pages can all register the one shared/a/sw.js with the one
-//            shared scope, regardless of which mirror the visitor actually opened.
+// --mirrors  entry-point folders, either a plain number (e.g. 1000 -> v0001..v1000) or a
+//            comma-separated list of names (default: v0001). Each one becomes a tiny
+//            index.svg; everything else lives once under shared/ and every mirror points
+//            at it. A Service Worker's scope ceiling is set by the directory of the SCRIPT
+//            that registers it, not the page that calls .register() - so many different
+//            mirror pages can all register the one shared/a/sw.js with the one shared
+//            scope, regardless of which mirror the visitor actually opened.
 // --engine   (optional) a GitHub-hosted base URL (e.g. a raw.githack.com or jsDelivr link
 //            to another repo) that already holds the engine files
 //            (controller/core/networking/transport). When set, this build does NOT copy
@@ -44,7 +45,16 @@ if (!/^wss?:\/\/[^/]+$/.test(backend)) {
   console.error('Missing or invalid --backend (expected something like wss://your-address.example)');
   process.exit(1);
 }
-const mirrors = (args.mirrors || 'v0001').split(',').map((s) => s.trim()).filter(Boolean);
+const mirrorsArg = args.mirrors || 'v0001';
+let mirrors;
+if (/^\d+$/.test(mirrorsArg)) {
+  // A plain number generates that many sequentially-numbered mirrors: v0001, v0002, ...
+  const count = Number(mirrorsArg);
+  const width = Math.max(4, String(count).length);
+  mirrors = Array.from({ length: count }, (_, i) => 'v' + String(i + 1).padStart(width, '0'));
+} else {
+  mirrors = mirrorsArg.split(',').map((s) => s.trim()).filter(Boolean);
+}
 
 const root = __dirname;
 const out = path.resolve(root, args.out || 'site');
