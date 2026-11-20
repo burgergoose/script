@@ -9,12 +9,12 @@ const SEARCH_ENGINES = {
 };
 
 const THEMES = {
-  purple: '#8f7bff',
-  blue: '#5b9dff',
-  teal: '#3fcfc0',
-  green: '#5fd17a',
-  orange: '#ff9d4d',
-  pink: '#ff7ab8',
+  matrix: '#39ff7a',
+  cyan: '#2de2ff',
+  amber: '#ffb000',
+  red: '#ff3b5c',
+  violet: '#b77bff',
+  ice: '#d7f7ff',
 };
 
 const SHORTCUTS = [
@@ -33,12 +33,12 @@ const frame = $('frame');
 const statusEl = $('status');
 
 // ---------- settings (kept in this browser only) ----------
-const settings = { search: 'ddg', theme: 'purple', ads: true };
+const settings = { search: 'ddg', theme: 'matrix', ads: true };
 try {
   Object.assign(settings, JSON.parse(localStorage.getItem('cfg') || '{}'));
 } catch { /* storage unavailable: use defaults */ }
 if (!SEARCH_ENGINES[settings.search]) settings.search = 'ddg';
-if (!THEMES[settings.theme]) settings.theme = 'purple';
+if (!THEMES[settings.theme]) settings.theme = 'matrix';
 
 function saveSettings() {
   try { localStorage.setItem('cfg', JSON.stringify(settings)); } catch { /* ignore */ }
