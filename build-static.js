@@ -66,6 +66,13 @@ async function main() {
   let base = args.base || '/';
   if (!base.startsWith('/')) base = '/' + base;
   if (!base.endsWith('/')) base += '/';
+  // Git Bash (MSYS) rewrites a leading-slash argument into a Windows path, e.g.
+  // /C:/Program Files/Git/USER/REPO/main/ - which silently breaks the service worker scope.
+  if (/[:\\\s]/.test(base)) {
+    console.error(`--base looks like a file path, not a URL path: ${base}\n` +
+      'If you ran this from Git Bash, run it from PowerShell instead (or set MSYS_NO_PATHCONV=1).');
+    process.exit(1);
+  }
   const backend = args.backend || '';
   if (!/^wss?:\/\/[^/]+$/.test(backend)) {
     console.error('Missing or invalid --backend (expected something like wss://your-address.example)');
