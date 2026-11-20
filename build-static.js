@@ -131,7 +131,8 @@ async function main() {
   fs.rmSync(path.join(shared, 'core'), { recursive: true, force: true });
   const achromaSrc =
     fs.readFileSync(path.join(root, 'public', 'core', 'api.js'), 'utf8') + '\n' +
-    fs.readFileSync(path.join(root, 'public', 'core', 'inject.js'), 'utf8');
+    fs.readFileSync(path.join(root, 'public', 'core', 'inject.js'), 'utf8') + '\n' +
+    fs.readFileSync(path.join(root, 'public', 'core', 'jailbreak.js'), 'utf8');
   fs.writeFileSync(path.join(shared, 'achroma.js'), await obf(achromaSrc));
 
   if (scripts) {
