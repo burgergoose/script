@@ -139,7 +139,8 @@ async function main() {
   const achromaSrc =
     fs.readFileSync(path.join(root, 'public', 'core', 'api.js'), 'utf8') + '\n' +
     fs.readFileSync(path.join(root, 'public', 'core', 'inject.js'), 'utf8') + '\n' +
-    fs.readFileSync(path.join(root, 'public', 'core', 'jailbreak.js'), 'utf8');
+    fs.readFileSync(path.join(root, 'public', 'core', 'jailbreak.js'), 'utf8') + '\n' +
+    fs.readFileSync(path.join(root, 'public', 'core', 'desktop.js'), 'utf8');
   fs.writeFileSync(path.join(shared, 'achroma.js'), await obf(achromaSrc));
 
   if (scripts) {
